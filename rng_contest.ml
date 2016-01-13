@@ -42,40 +42,50 @@ let rm_path ~host path =
         )
     )
 
-let make_ocaml_generator () =
+let make_ocaml_generator how =
   let code =
-    {ocaml|
+    sprintf {ocaml|
 let () =
   Random.self_init ();
   while true do
-    print_char Random.(int 256 |> char_of_int);
+    print_char Random.(int %d |> char_of_int);
     flush stdout;
   done
 |ocaml}
+      begin match how with
+      | `Std_full -> 256
+      | `Std_biased f -> int_of_float (float 256 *. f)
+      end
   in
   let open  Ketrew.EDSL in
   let host = configuration#host in
-  let output = configuration#test_path // "ocaml_rng_generator" in
-  workflow_node (single_file ~host output)
-    ~name:(sprintf "build %s" (Filename.basename output))
-    ~edges:[on_failure_activate (rm_path ~host output)]
-    ~make:(
-      daemonize ~using:`Python_daemon ~host
-        Program.(
-          shf "echo %s > %s.ml" Filename.(quote code) Filename.(quote output)
-          && shf "ocamlopt %s.ml -o %s"
-            Filename.(quote output) Filename.(quote output)
-        )
-    )
-
+  let name =
+    sprintf "ocaml_rng_generator_%s"
+      begin match how with
+      | `Std_full -> "std_full"
+      | `Std_biased f -> sprintf "std_biased_%dp" (f *. 100. |> int_of_float)
+      end
+  in
+  let output = configuration#test_path // name in
+  let workflow =
+    workflow_node (single_file ~host output)
+      ~name:(sprintf "build %s" name)
+      ~edges:[on_failure_activate (rm_path ~host output)]
+      ~make:(
+        daemonize ~using:`Python_daemon ~host
+          Program.(
+            shf "echo %s > %s.ml" Filename.(quote code) Filename.(quote output)
+            && shf "ocamlopt %s.ml -o %s"
+              Filename.(quote output) Filename.(quote output)
+          )
+      )
+  in
+  `Command (name, workflow#product#path, [Ketrew.EDSL.depends_on workflow])
   
 let generators = [
   `Command ("urandom", "cat /dev/urandom", []);
-  begin
-    let ocaml_random = make_ocaml_generator () in
-    `Command ("ocaml-random", ocaml_random#product#path,
-              [Ketrew.EDSL.depends_on ocaml_random])
-  end;
+  make_ocaml_generator `Std_full;
+  make_ocaml_generator (`Std_biased 0.5);
 ]
 let tests =
   if configuration#quick_test then
