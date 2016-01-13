@@ -117,6 +117,7 @@ let dieharder generator ~test =
             shf "%s | %s -g 200 %s > %s"
               cmd configuration#dieharder_command
               test_option Filename.(quote output)
+            && sh "sleep 20" (* common hack to avoid NFS sync-delay issues *)
           )
       )
 
