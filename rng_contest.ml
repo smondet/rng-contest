@@ -11,13 +11,22 @@ let say fmt = ksprintf (Printf.printf "%s\n%!") fmt
 let configuration =
   let getenv s =
     try Sys.getenv s with _ -> say "Missing variable: %S" s; exit 1 in
-  object
+  object (self)
     method test_path = getenv "TEST_DIR"
     method host = Ketrew.EDSL.Host.parse (getenv "YARN_HOST")
     method dieharder_command =
       try Sys.getenv "DIEHARDER" with _ -> "dieharder"
     method quick_test =
       try Sys.getenv "QUICK_TEST" = "true" with _ -> false
+    method to_string ~indentation =
+      let indent = String.make indentation ' ' in
+      List.map ~f:(fun (k,v) -> sprintf "%s- %s: %s" indent k v) [
+        "Test-path", self#test_path;
+        "Host", Ketrew_pure.Host.to_string_hum self#host;
+        "Dieharder command", sprintf "`%s`" self#dieharder_command;
+        "Run mode",
+        (match self#quick_test with true -> "Quick-test" | false -> "Full-test");
+      ] |> String.concat ~sep:"\n"
 
   end
 
@@ -126,9 +135,11 @@ let the_workflow =
 let () =
   match Sys.argv |> Array.to_list |> List.tl_exn with
   | "view" :: [] ->
-    say "%s" @@
-    Ketrew.EDSL.workflow_to_string ~ansi_colors:true
-      the_workflow
+    say "Configuration:\n%s\nWorkflow:\n  %s"
+      (configuration#to_string ~indentation:2)
+      (Ketrew.EDSL.workflow_to_string
+         ~ansi_colors:false
+         ~indentation:4 the_workflow)
   | "run" :: [] ->
     Ketrew.Client.submit_workflow the_workflow
       ~add_tags:["RNG-contest"]
